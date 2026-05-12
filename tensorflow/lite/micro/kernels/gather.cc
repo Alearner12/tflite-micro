@@ -82,13 +82,22 @@ TfLiteStatus Gather(const TfLiteGatherParams* params,
   for (int batch = 0; batch < batch_size; ++batch) {
     for (int outer = 0; outer < outer_size; ++outer) {
       for (int coord = 0; coord < coord_size; ++coord) {
-        TFLITE_DCHECK_GE(coords_data[coord], 0);
-        TFLITE_DCHECK_LT(coords_data[coord], axis_size);
+        // Read the actual coord value the memcpy will use. The DCHECK in the
+        // previous version of this code read `coords_data[coord]` (wrong index
+        // for batch > 0) and was stripped in release builds, so an attacker-
+        // controlled `.tflite` could pass arbitrary coords data and trigger
+        // an out-of-bounds read on input_data. Match the upstream TFLite
+        // reference (tensorflow/lite/kernels/internal/reference/gather.h)
+        // and reject negative or oversize coords at runtime.
+        const CoordsT coord_val = coords_data[batch * coord_size + coord];
+        if (coord_val < 0 || coord_val >= axis_size) {
+          return kTfLiteError;
+        }
         std::memcpy(output_data +
                         (((batch * outer_size) + outer) * coord_size + coord) *
                             inner_size,
                     input_data + (((batch * outer_size) + outer) * axis_size +
-                                  coords_data[batch * coord_size + coord]) *
+                                  coord_val) *
                                      inner_size,
                     sizeof(InputT) * inner_size);
       }
